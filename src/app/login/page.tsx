@@ -97,7 +97,10 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="text-center">
+          <div className="flex items-center justify-between">
+            <Link href="/forgot-password" className="text-primary-600 hover:text-primary-500 text-sm">
+              Forgot password?
+            </Link>
             <Link href="/register" className="text-primary-600 hover:text-primary-500 text-sm">
               Don&apos;t have an account? Register
             </Link>

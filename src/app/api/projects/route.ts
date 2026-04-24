@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkAuth, applyRateLimit } from "@/lib/apiUtils";
+import { projectSchema, sanitizeObject } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -15,6 +18,9 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get("search") || "";
   const status = searchParams.get("status") || "";
   const clientId = searchParams.get("clientId") || "";
+
+  const sortField = searchParams.get("sortField") || "createdAt";
+  const sortDirection = searchParams.get("sortDirection") || "desc";
 
   const where = {
     ...(search && {
@@ -27,6 +33,10 @@ export async function GET(request: NextRequest) {
     ...(clientId && { clientId })
   };
 
+  const allowedSortFields = ["name", "status", "createdAt", "budget"];
+  const orderField = allowedSortFields.includes(sortField) ? sortField : "createdAt";
+  const orderDir = sortDirection === "asc" ? "asc" : "desc";
+
   const [projects, total] = await Promise.all([
     prisma.project.findMany({
       where,
@@ -35,7 +45,7 @@ export async function GET(request: NextRequest) {
         manager: { select: { name: true } },
         _count: { select: { tasks: true, milestones: true, teamMembers: true } }
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { [orderField]: orderDir },
       skip: (page - 1) * limit,
       take: limit
     }),
@@ -49,25 +59,38 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   try {
-    const data = await request.json();
-    const userId = (session.user as { id: string }).id;
+    const body = await request.json();
+
+    const validation = projectSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    const data = sanitizeObject(validation.data as Record<string, unknown>);
+    const userId = (auth.session!.user as { id: string }).id;
 
     const project = await prisma.project.create({
       data: {
-        name: data.name,
-        description: data.description,
-        clientId: data.clientId,
-        managerId: data.managerId || userId,
-        status: data.status || "PLANNING",
-        startDate: data.startDate ? new Date(data.startDate) : null,
-        endDate: data.endDate ? new Date(data.endDate) : null,
-        budget: data.budget ? parseFloat(data.budget) : null
+        name: data.name as string,
+        description: (data.description as string) || null,
+        clientId: data.clientId as string,
+        managerId: userId,
+        status: (data.status as "PLANNING" | "IN_PROGRESS" | "ON_HOLD" | "COMPLETED" | "CANCELLED") || "PLANNING",
+        startDate: data.startDate ? new Date(data.startDate as string) : null,
+        endDate: data.endDate ? new Date(data.endDate as string) : null,
+        budget: data.budget ? Number(data.budget) : null
       }
     });
 

@@ -7,7 +7,11 @@ import {
   Target,
   DollarSign,
   TrendingUp,
-  Clock
+  Clock,
+  Briefcase,
+  Receipt,
+  BarChart3,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -18,6 +22,7 @@ async function getStats() {
     campaignCount,
     candidateCount,
     leadCount,
+    jobCount,
     invoiceSum,
     activeProjects,
     recentActivities
@@ -27,6 +32,7 @@ async function getStats() {
     prisma.campaign.count(),
     prisma.candidate.count(),
     prisma.lead.count(),
+    prisma.jobPosition.count({ where: { status: "OPEN" } }),
     prisma.invoice.aggregate({
       _sum: { total: true },
       where: { status: "PAID" }
@@ -45,6 +51,7 @@ async function getStats() {
     campaignCount,
     candidateCount,
     leadCount,
+    jobCount,
     revenue: invoiceSum._sum.total || 0,
     activeProjects,
     recentActivities
@@ -55,12 +62,15 @@ export default async function DashboardPage() {
   const stats = await getStats();
 
   const statCards = [
-    { label: "Total Clients", value: stats.clientCount, icon: Users, href: "/dashboard/clients", color: "bg-blue-500" },
-    { label: "Active Projects", value: stats.activeProjects, icon: FolderKanban, href: "/dashboard/projects", color: "bg-green-500" },
-    { label: "Campaigns", value: stats.campaignCount, icon: Megaphone, href: "/dashboard/campaigns", color: "bg-purple-500" },
-    { label: "Candidates", value: stats.candidateCount, icon: UserSearch, href: "/dashboard/candidates", color: "bg-orange-500" },
-    { label: "Active Leads", value: stats.leadCount, icon: Target, href: "/dashboard/leads", color: "bg-pink-500" },
-    { label: "Revenue", value: `$${stats.revenue.toLocaleString()}`, icon: DollarSign, href: "/dashboard/billing", color: "bg-emerald-500" },
+    { label: "Total Clients", value: stats.clientCount, icon: Users, href: "/dashboard/clients", color: "bg-blue-500", hoverColor: "hover:ring-blue-300" },
+    { label: "Active Projects", value: stats.activeProjects, icon: FolderKanban, href: "/dashboard/projects", color: "bg-green-500", hoverColor: "hover:ring-green-300" },
+    { label: "Campaigns", value: stats.campaignCount, icon: Megaphone, href: "/dashboard/campaigns", color: "bg-purple-500", hoverColor: "hover:ring-purple-300" },
+    { label: "Candidates", value: stats.candidateCount, icon: UserSearch, href: "/dashboard/candidates", color: "bg-orange-500", hoverColor: "hover:ring-orange-300" },
+    { label: "Open Jobs", value: stats.jobCount, icon: Briefcase, href: "/dashboard/jobs", color: "bg-cyan-500", hoverColor: "hover:ring-cyan-300" },
+    { label: "Active Leads", value: stats.leadCount, icon: Target, href: "/dashboard/leads", color: "bg-pink-500", hoverColor: "hover:ring-pink-300" },
+    { label: "Revenue", value: `$${stats.revenue.toLocaleString()}`, icon: DollarSign, href: "/dashboard/billing", color: "bg-emerald-500", hoverColor: "hover:ring-emerald-300" },
+    { label: "Reports", value: "View", icon: BarChart3, href: "/dashboard/reports", color: "bg-indigo-500", hoverColor: "hover:ring-indigo-300" },
+    { label: "AI Tools", value: "Open", icon: Sparkles, href: "/dashboard/ai", color: "bg-violet-500", hoverColor: "hover:ring-violet-300" },
   ];
 
   return (
@@ -70,6 +80,7 @@ export default async function DashboardPage() {
         <p className="text-gray-500">Welcome to your agency management platform</p>
       </div>
 
+      {/* Clickable Stat Cards - Navigate to each section */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {statCards.map((stat) => {
           const Icon = stat.icon;
@@ -77,17 +88,20 @@ export default async function DashboardPage() {
             <Link
               key={stat.label}
               href={stat.href}
-              className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+              className={`bg-white rounded-lg shadow p-6 hover:shadow-lg transition-all ring-2 ring-transparent ${stat.hoverColor} cursor-pointer group`}
             >
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-500">{stat.label}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
                 </div>
-                <div className={`p-3 rounded-lg ${stat.color}`}>
+                <div className={`p-3 rounded-lg ${stat.color} group-hover:scale-110 transition-transform`}>
                   <Icon className="w-6 h-6 text-white" />
                 </div>
               </div>
+              <p className="text-xs text-primary-600 mt-3 font-medium group-hover:underline">
+                View Details &rarr;
+              </p>
             </Link>
           );
         })}
@@ -126,6 +140,20 @@ export default async function DashboardPage() {
             >
               <Target className="w-5 h-5 text-primary-600" />
               <span className="text-sm font-medium">Add Lead</span>
+            </Link>
+            <Link
+              href="/dashboard/candidates/new"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <UserSearch className="w-5 h-5 text-primary-600" />
+              <span className="text-sm font-medium">Add Candidate</span>
+            </Link>
+            <Link
+              href="/dashboard/jobs/new"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <Briefcase className="w-5 h-5 text-primary-600" />
+              <span className="text-sm font-medium">Post Job</span>
             </Link>
           </div>
         </div>

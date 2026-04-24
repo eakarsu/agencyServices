@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkAuth, applyRateLimit } from "@/lib/apiUtils";
+import { clientSchema, sanitizeObject } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -14,6 +17,8 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "10");
   const search = searchParams.get("search") || "";
   const status = searchParams.get("status") || "";
+  const sortField = searchParams.get("sortField") || "createdAt";
+  const sortDirection = searchParams.get("sortDirection") || "desc";
 
   const where = {
     ...(search && {
@@ -26,6 +31,10 @@ export async function GET(request: NextRequest) {
     ...(status && { status: status as "ACTIVE" | "INACTIVE" | "PROSPECT" | "CHURNED" })
   };
 
+  const allowedSortFields = ["name", "email", "company", "status", "createdAt"];
+  const orderField = allowedSortFields.includes(sortField) ? sortField : "createdAt";
+  const orderDir = sortDirection === "asc" ? "asc" : "desc";
+
   const [clients, total] = await Promise.all([
     prisma.client.findMany({
       where,
@@ -34,7 +43,7 @@ export async function GET(request: NextRequest) {
         projects: { select: { id: true } },
         _count: { select: { projects: true, invoices: true } }
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { [orderField]: orderDir },
       skip: (page - 1) * limit,
       take: limit
     }),
@@ -53,26 +62,41 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   try {
-    const data = await request.json();
-    const userId = (session.user as { id: string }).id;
+    const body = await request.json();
+
+    // Validate input
+    const validation = clientSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    // Sanitize input
+    const data = sanitizeObject(validation.data as Record<string, unknown>);
+    const userId = (auth.session!.user as { id: string }).id;
 
     const client = await prisma.client.create({
       data: {
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-        company: data.company,
-        website: data.website,
-        address: data.address,
-        industry: data.industry,
-        status: data.status || "ACTIVE",
-        notes: data.notes,
+        name: data.name as string,
+        email: data.email as string,
+        phone: (data.phone as string) || null,
+        company: (data.company as string) || null,
+        website: (data.website as string) || null,
+        address: (data.address as string) || null,
+        industry: (data.industry as string) || null,
+        status: (data.status as "ACTIVE" | "INACTIVE" | "PROSPECT" | "CHURNED") || "ACTIVE",
+        notes: (data.notes as string) || null,
         createdById: userId
       }
     });

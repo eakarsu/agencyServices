@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkAuth, applyRateLimit } from "@/lib/apiUtils";
+import { sanitizeObject } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -14,6 +17,9 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "10");
   const search = searchParams.get("search") || "";
   const status = searchParams.get("status") || "";
+
+  const sortField = searchParams.get("sortField") || "createdAt";
+  const sortDirection = searchParams.get("sortDirection") || "desc";
 
   const where = {
     ...(search && {
@@ -26,6 +32,10 @@ export async function GET(request: NextRequest) {
     ...(status && { status: status as "NEW" | "SCREENING" | "INTERVIEWING" | "OFFERED" | "PLACED" | "REJECTED" | "WITHDRAWN" })
   };
 
+  const allowedSortFields = ["firstName", "lastName", "status", "score", "experience", "createdAt"];
+  const orderField = allowedSortFields.includes(sortField) ? sortField : "createdAt";
+  const orderDir = sortDirection === "asc" ? "asc" : "desc";
+
   const [candidates, total] = await Promise.all([
     prisma.candidate.findMany({
       where,
@@ -33,7 +43,7 @@ export async function GET(request: NextRequest) {
         createdBy: { select: { name: true } },
         _count: { select: { applications: true, interviews: true } }
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { [orderField]: orderDir },
       skip: (page - 1) * limit,
       take: limit
     }),
@@ -47,33 +57,46 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const rateLimitResponse = applyRateLimit(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const auth = await checkAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   try {
-    const data = await request.json();
-    const userId = (session.user as { id: string }).id;
+    const body = await request.json();
+    const data = sanitizeObject(body);
+    const userId = (auth.session!.user as { id: string }).id;
 
     const candidate = await prisma.candidate.create({
       data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email,
-        phone: data.phone,
-        resumeUrl: data.resumeUrl,
-        resumeText: data.resumeText,
-        skills: data.skills || [],
-        experience: data.experience ? parseInt(data.experience) : null,
-        currentTitle: data.currentTitle,
-        currentCompany: data.currentCompany,
-        expectedSalary: data.expectedSalary ? parseFloat(data.expectedSalary) : null,
-        location: data.location,
-        status: data.status || "NEW",
-        source: data.source,
-        notes: data.notes,
+        firstName: data.firstName as string,
+        lastName: data.lastName as string,
+        email: data.email as string,
+        phone: (data.phone as string) || null,
+        resumeUrl: (data.resumeUrl as string) || null,
+        resumeText: (data.resumeText as string) || null,
+        skills: (data.skills as string[]) || [],
+        experience: data.experience ? parseInt(String(data.experience)) : null,
+        currentTitle: (data.currentTitle as string) || null,
+        currentCompany: (data.currentCompany as string) || null,
+        expectedSalary: data.expectedSalary ? parseFloat(String(data.expectedSalary)) : null,
+        location: (data.location as string) || null,
+        status: (data.status as string as "NEW" | "SCREENING" | "INTERVIEWING" | "OFFERED" | "PLACED" | "REJECTED" | "WITHDRAWN") || "NEW",
+        source: (data.source as string) || null,
+        notes: (data.notes as string) || null,
         createdById: userId
+      }
+    });
+
+    await prisma.activity.create({
+      data: {
+        userId,
+        action: "added a new candidate",
+        entityType: "Candidate",
+        entityId: candidate.id
       }
     });
 
