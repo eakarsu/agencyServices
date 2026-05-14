@@ -75,6 +75,37 @@ export const campaignSchema = z.object({
   endDate: z.string().optional(),
 });
 
+// Candidate form validation
+export const candidateSchema = z.object({
+  firstName: z.string().min(1, "First name is required").max(50),
+  lastName: z.string().min(1, "Last name is required").max(50),
+  email: z.string().email("Invalid email address"),
+  phone: z.string().optional(),
+  resumeUrl: z.string().url("Invalid URL").optional().or(z.literal("")).optional(),
+  resumeText: z.string().max(50000).optional(),
+  skills: z.array(z.string()).optional().default([]),
+  experience: z.number().int().min(0).max(50).optional(),
+  currentTitle: z.string().max(200).optional(),
+  currentCompany: z.string().max(200).optional(),
+  expectedSalary: z.number().min(0).optional(),
+  location: z.string().max(200).optional(),
+  status: z.enum(["NEW", "SCREENING", "INTERVIEWING", "OFFERED", "PLACED", "REJECTED", "WITHDRAWN"]).optional().default("NEW"),
+  source: z.string().max(100).optional(),
+  notes: z.string().max(5000).optional(),
+});
+
+// Task form validation
+export const taskSchema = z.object({
+  title: z.string().min(1, "Title is required").max(500),
+  description: z.string().max(5000).optional(),
+  projectId: z.string().min(1, "Project is required"),
+  assigneeId: z.string().optional(),
+  status: z.enum(["TODO", "IN_PROGRESS", "IN_REVIEW", "DONE", "CANCELLED"]).optional().default("TODO"),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional().default("MEDIUM"),
+  dueDate: z.string().optional(),
+  estimatedHours: z.number().min(0).max(1000).optional(),
+});
+
 // Registration form validation
 export const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(100),

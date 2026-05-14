@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { emitTaskEvent } from "@/app/api/tasks/events/route";
 
 export async function GET(
   request: NextRequest,
@@ -64,6 +65,9 @@ export async function PUT(
       },
       include: { assignee: { select: { id: true, name: true } } }
     });
+
+    // Emit real-time event to SSE subscribers
+    emitTaskEvent("task:updated", task);
 
     return NextResponse.json(task);
   } catch (error) {

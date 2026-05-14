@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAuth, applyRateLimit } from "@/lib/apiUtils";
-import { sanitizeObject } from "@/lib/validation";
+import { candidateSchema, sanitizeObject } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = applyRateLimit(request);
@@ -67,7 +67,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const data = sanitizeObject(body);
+
+    const validation = candidateSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    const data = sanitizeObject(validation.data as unknown as Record<string, unknown>);
     const userId = (auth.session!.user as { id: string }).id;
 
     const candidate = await prisma.candidate.create({
@@ -84,7 +93,7 @@ export async function POST(request: NextRequest) {
         currentCompany: (data.currentCompany as string) || null,
         expectedSalary: data.expectedSalary ? parseFloat(String(data.expectedSalary)) : null,
         location: (data.location as string) || null,
-        status: (data.status as string as "NEW" | "SCREENING" | "INTERVIEWING" | "OFFERED" | "PLACED" | "REJECTED" | "WITHDRAWN") || "NEW",
+        status: (data.status as "NEW" | "SCREENING" | "INTERVIEWING" | "OFFERED" | "PLACED" | "REJECTED" | "WITHDRAWN") || "NEW",
         source: (data.source as string) || null,
         notes: (data.notes as string) || null,
         createdById: userId
