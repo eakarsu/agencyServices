@@ -24,6 +24,7 @@ const navItems = [
   { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/dashboard/candidates", label: "Candidates", icon: UserSearch },
+  { href: "/dashboard/placement-guarantees", label: "Guarantees", icon: UserSearch },
   { href: "/dashboard/jobs", label: "Jobs", icon: Briefcase },
   { href: "/dashboard/leads", label: "Leads", icon: Target },
   { href: "/dashboard/billing", label: "Billing", icon: Receipt },
