@@ -1,0 +1,17 @@
+name: Governed outreach
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test governance/outreach.test.cjs
+      - run: node --check governance/outreach.cjs
+      - run: bash -n start.sh
+      - name: Migration safety
+        run: |
+          grep -q 'BEGIN;' prisma/migrations/202607180001_governed_outreach/migration.sql
+          ! grep -Eiq 'DROP (TABLE|DATABASE)|TRUNCATE' prisma/migrations/202607180001_governed_outreach/migration.sql

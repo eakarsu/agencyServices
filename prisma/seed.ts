@@ -5,6 +5,13 @@ import crypto from 'crypto';
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.ALLOW_DEMO_SEED !== 'true') {
+    throw new Error('Refusing demo seed without ALLOW_DEMO_SEED=true');
+  }
+  const demoPassword = process.env.DEMO_PASSWORD;
+  if (!demoPassword || demoPassword.length < 12) {
+    throw new Error('DEMO_PASSWORD must contain at least 12 characters');
+  }
   console.log('Seeding database with comprehensive sample data...');
 
   // ==================== LOOKUPS (Configurable Dropdowns) ====================
@@ -97,7 +104,7 @@ async function main() {
   }
   console.log(`Created ${lookupData.length} lookup values`);
 
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  const hashedPassword = await bcrypt.hash(demoPassword, 12);
 
   // ==================== USERS (15+) ====================
   console.log('Creating users...');

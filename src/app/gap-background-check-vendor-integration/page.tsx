@@ -25,7 +25,7 @@ export default function BackgroundCheckVendorIntegrationPage() {
       }
   ];
 
-  const applySampleRequest = (value) => {
+  const applySampleRequest = (value: string) => {
     setInput(value);
     setError(null);
     setResult(null);

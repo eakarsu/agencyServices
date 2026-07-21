@@ -1,0 +1,17 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const fs = require('node:fs'); const path = require('node:path');
+const { digest, canTransition, normalizeEmail, sourceIdentity, evaluateOutreach, dataQuality, conversion, retryState } = require('./outreach.cjs');
+const root = path.resolve(__dirname, '..'); const future = '2030-01-01T12:00:00Z';
+const base = { email:' Person@Example.COM ',region:'EU',channel:'email',consentStatus:'granted',consentRef:'consent:1',privacyBasis:'legitimate-interest-reviewed',ownerId:'owner:1',templateVersion:'welcome-v3',campaignId:'campaign:1',scheduledAt:future,recipientMessagesLast24h:0,tenantMessagesLastMinute:2,sourceRef:'crm:1' };
+test('canonical digest is stable and payload bound',()=>{assert.equal(digest({b:2,a:1}),digest({a:1,b:2}));assert.notEqual(digest({a:1}),digest({a:2}));});
+test('source identity is normalized and rejects unsafe values',()=>{assert.equal(sourceIdentity('CRM','42'),'crm:42');assert.throws(()=>sourceIdentity('../x','1'));});
+test('email normalization is deterministic',()=>assert.equal(normalizeEmail(' A@B.COM '),'a@b.com'));
+test('lifecycle denies shortcuts',()=>{assert.equal(canTransition('draft','review_pending'),true);assert.equal(canTransition('draft','sent'),false);});
+test('valid outreach remains human-review gated',()=>{const out=evaluateOutreach(base,new Date('2029-01-01'));assert.deepEqual(out.errors,[]);assert.equal(out.decision.humanReviewRequired,true);});
+test('suppression and opt-out fail closed',()=>assert.match(evaluateOutreach({...base,suppressed:true},new Date('2029-01-01')).errors.join(','),/suppressed/));
+test('consent and regional privacy fail closed',()=>assert.ok(evaluateOutreach({...base,consentRef:'',privacyBasis:''},new Date('2029-01-01')).errors.length>=2));
+test('frequency and tenant limits fail closed',()=>assert.ok(evaluateOutreach({...base,recipientMessagesLast24h:3,tenantMessagesLastMinute:100},new Date('2029-01-01')).errors.length>=2));
+test('data quality reports duplicates and completeness',()=>assert.deepEqual(dataQuality([{email:'a@b.com',ownerId:'o',consentRef:'c'},{email:'A@B.COM'}]),{total:2,unique:1,duplicates:1,completenessRate:.5}));
+test('conversion only attributes known leads',()=>assert.deepEqual(conversion([{type:'lead_created',leadId:'1'},{type:'lead_converted',leadId:'1'},{type:'lead_converted',leadId:'2'}]),{leads:1,conversions:1,conversionRate:1}));
+test('retry policy dead-letters bounded or permanent failures',()=>{assert.equal(retryState(4,true),'failed');assert.equal(retryState(5,true),'dead_letter');assert.equal(retryState(1,false),'dead_letter');});
+test('migration, API, CI and launcher expose governed controls',()=>{const sql=fs.readFileSync(path.join(root,'prisma/migrations/202607180001_governed_outreach/migration.sql'),'utf8');const api=fs.readFileSync(path.join(root,'src/app/api/governed-outreach/route.ts'),'utf8');const launch=fs.readFileSync(path.join(root,'start.sh'),'utf8');assert.match(sql,/outreach_event_append_only/);assert.match(sql,/UNIQUE \("tenantId", "provider", "sourceRecordId"\)/);assert.match(api,/Idempotency-Key/);assert.match(api,/\$transaction/);assert.doesNotMatch(launch,/kill -9|npm install|db push|seed/);assert.match(launch,/ALLOW_SCHEMA_MIGRATION/);});

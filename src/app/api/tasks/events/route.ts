@@ -7,7 +7,8 @@
  *
  * To emit an event from any PUT/POST task handler, POST to
  * /api/tasks/events/notify (internal, server-to-server only) with
- * { event, task } — or use the emitTaskEvent() helper exported here.
+ * { event, task }. The shared subscriber helper lives outside this route module
+ * because Next.js route files may export only HTTP handlers and route metadata.
  *
  * Architecture note: Next.js App Router does not support Socket.IO natively.
  * SSE via ReadableStream is the idiomatic real-time pattern for Next.js 14.
@@ -15,29 +16,7 @@
 
 import { NextRequest } from "next/server";
 import { checkAuth } from "@/lib/apiUtils";
-
-// In-process subscriber registry (works for single-process deployments / dev).
-// For multi-instance production, replace with Redis pub/sub.
-type Subscriber = {
-  controller: ReadableStreamDefaultController;
-  projectId: string | null;
-};
-
-const subscribers = new Set<Subscriber>();
-
-export function emitTaskEvent(event: "task:created" | "task:updated", task: unknown) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(task)}\n\n`;
-  const encoder = new TextEncoder();
-  for (const sub of Array.from(subscribers)) {
-    const taskProjectId = (task as { projectId?: string }).projectId;
-    if (sub.projectId && taskProjectId && sub.projectId !== taskProjectId) continue;
-    try {
-      sub.controller.enqueue(encoder.encode(payload));
-    } catch {
-      // Client disconnected; will be cleaned up on abort
-    }
-  }
-}
+import { setTaskEventHeartbeat, subscribeToTaskEvents, unsubscribeFromTaskEvents } from "@/lib/taskEvents";
 
 export async function GET(request: NextRequest) {
   const auth = await checkAuth();
@@ -51,12 +30,11 @@ export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId") || null;
   const encoder = new TextEncoder();
 
-  let subscriber: Subscriber;
+  let subscriber: ReturnType<typeof subscribeToTaskEvents>;
 
   const stream = new ReadableStream({
     start(controller) {
-      subscriber = { controller, projectId };
-      subscribers.add(subscriber);
+      subscriber = subscribeToTaskEvents(controller, projectId);
 
       // Send initial heartbeat
       controller.enqueue(encoder.encode(": connected\n\n"));
@@ -71,12 +49,10 @@ export async function GET(request: NextRequest) {
       }, 25000);
 
       // Store interval on subscriber for cleanup
-      (subscriber as unknown as { heartbeat: ReturnType<typeof setInterval> }).heartbeat = heartbeat;
+      setTaskEventHeartbeat(subscriber, heartbeat);
     },
     cancel() {
-      const hb = (subscriber as unknown as { heartbeat: ReturnType<typeof setInterval> }).heartbeat;
-      if (hb) clearInterval(hb);
-      subscribers.delete(subscriber);
+      unsubscribeFromTaskEvents(subscriber);
     }
   });
 

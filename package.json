@@ -7,9 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "node --test governance/outreach.test.cjs",
+    "check:governance": "node --check governance/outreach.cjs && bash -n start.sh",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
+    "db:seed": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
+    "create-admin": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/create-admin.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.2",
