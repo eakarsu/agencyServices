@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import { PrismaClient } from '@prisma/client';
 import { executeScript, literal } from './db.mjs';
 
 const email=String(process.env.PROVISION_ADMIN_EMAIL||process.env.ADMIN_EMAIL||'').trim().toLowerCase();
@@ -27,5 +29,18 @@ executeScript(`
   ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash,role='admin',active=TRUE;
   COMMIT;
 `);
-console.log('Runtime identity and AI persistence reconciled.');
 
+if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEMO_CREDENTIAL_AUTOFILL !== 'false') {
+  const prisma = new PrismaClient();
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.upsert({
+      where: { email },
+      update: { password: passwordHash, name: 'Runtime Administrator', role: 'ADMIN', emailVerified: true },
+      create: { email, password: passwordHash, name: 'Runtime Administrator', role: 'ADMIN', emailVerified: true },
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+console.log('Runtime identity and AI persistence reconciled.');
