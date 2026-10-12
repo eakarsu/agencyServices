@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import FeatureReportWorkspace from "@/components/FeatureReportWorkspace";
 import {
   Sparkles, FileText, Mail, Share2, Search, Users, MessageSquare, BarChart3,
-  UserCheck, HelpCircle, FileSignature, TrendingUp, Loader2
+  UserCheck, HelpCircle, FileSignature, TrendingUp
 } from "lucide-react";
 
 const aiTools = [
@@ -23,31 +24,6 @@ const aiTools = [
 
 export default function AIToolsPage() {
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleGenerate = async () => {
-    if (!selectedTool || !prompt.trim()) return;
-    setLoading(true);
-    setResult("");
-
-    try {
-      const response = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: selectedTool, prompt })
-      });
-      const data = await response.json();
-      setResult(data.content || data.error || "No result generated");
-    } catch (error) {
-      console.error("Error generating content:", error);
-      setResult("Error generating content. Please check your OpenAI API key.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const selectedToolInfo = aiTools.find(t => t.id === selectedTool);
 
   return (
@@ -66,7 +42,7 @@ export default function AIToolsPage() {
               return (
                 <button
                   key={tool.id}
-                  onClick={() => { setSelectedTool(tool.id); setResult(""); }}
+                  onClick={() => { setSelectedTool(tool.id); }}
                   className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all ${
                     selectedTool === tool.id
                       ? "border-primary-500 bg-primary-50"
@@ -88,67 +64,7 @@ export default function AIToolsPage() {
 
         <div className="lg:col-span-2 bg-white rounded-lg shadow p-6">
           {selectedTool ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                {selectedToolInfo && (
-                  <>
-                    <div className={`p-2 rounded-lg ${selectedToolInfo.color}`}>
-                      <selectedToolInfo.icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="font-semibold text-gray-900">{selectedToolInfo.name}</h2>
-                      <p className="text-sm text-gray-500">{selectedToolInfo.description}</p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  What would you like to generate?
-                </label>
-                <textarea
-                  rows={4}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe what you need..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <button
-                onClick={handleGenerate}
-                disabled={loading || !prompt.trim()}
-                className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    Generate
-                  </>
-                )}
-              </button>
-
-              {result && (
-                <div className="mt-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Result</label>
-                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap">
-                    {result}
-                  </div>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(result)}
-                    className="mt-2 text-sm text-primary-600 hover:text-primary-700"
-                  >
-                    Copy to clipboard
-                  </button>
-                </div>
-              )}
-            </div>
+            <FeatureReportWorkspace key={selectedTool} title={selectedToolInfo?.name || "AI tool"} apiPath={`/api/ai/generate?tool=${selectedTool}`}/>
           ) : (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500">
               <Sparkles className="w-12 h-12 mb-4 text-gray-300" />

@@ -1,217 +1,65 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-
-const toolPrompts: Record<string, string> = {
-  content: "You are a professional marketing content writer. Create engaging and persuasive content based on the user's request.",
-  email: "You are an expert business email writer. Draft professional, clear, and effective emails based on the user's requirements.",
-  social: "You are a social media expert. Create engaging social media posts optimized for engagement and reach.",
-  seo: "You are an SEO specialist. Analyze and provide SEO optimization suggestions for the given content.",
-  resume: "You are an HR specialist. Analyze and score resumes based on job requirements and candidate qualifications.",
-  lead: "You are a sales expert. Score and qualify leads based on their potential value and likelihood to convert.",
-  report: "You are a business analyst. Create comprehensive and insightful reports based on the provided data.",
-  matcher: "You are a recruiting specialist. Match candidates to job requirements and explain the fit.",
-  interview: "You are an HR expert. Generate relevant and insightful interview questions for the given role.",
-  proposal: "You are a business development expert. Create professional and persuasive client proposals.",
-  campaign: "You are a digital marketing expert. Provide insights and optimization suggestions for marketing campaigns.",
-  analysis: "You are a market research analyst. Conduct competitive analysis and provide strategic insights."
-};
-
-// Structured output tools that return JSON
-const structuredTools = new Set(["resume", "lead", "seo", "campaign", "analysis"]);
-
-// SSE streaming endpoint - GET /api/ai/generate/stream?tool=X&prompt=Y
-export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const searchParams = request.nextUrl.searchParams;
-  const tool = searchParams.get("tool");
-  const prompt = searchParams.get("prompt");
-
-  if (!tool || !prompt) {
-    return NextResponse.json({ error: "Missing tool or prompt" }, { status: 400 });
-  }
-
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL || "anthropic/claude-3-haiku";
-  const systemPrompt = toolPrompts[tool] || "You are a helpful assistant.";
-
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const sendEvent = (event: string, data: unknown) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-      };
-
-      if (!apiKey) {
-        sendEvent("chunk", { text: `[Demo Mode] Streaming response for ${tool} tool.\n\nRequest: "${prompt}"` });
-        sendEvent("done", { content: `[Demo Mode] Streaming response for ${tool} tool.` });
-        controller.close();
-        return;
-      }
-
-      try {
-        sendEvent("status", { message: "Connecting to AI..." });
-
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-            "X-Title": "Agency Services AI Platform"
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: prompt }
-            ],
-            max_tokens: 2000,
-            temperature: 0.7,
-            stream: true
-          })
-        });
-
-        if (!response.ok || !response.body) {
-          sendEvent("error", { message: "Failed to connect to AI service" });
-          controller.close();
-          return;
-        }
-
-        sendEvent("status", { message: "Generating..." });
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const dataStr = line.slice(6).trim();
-            if (dataStr === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(dataStr);
-              const text = parsed.choices?.[0]?.delta?.content;
-              if (text) {
-                fullContent += text;
-                sendEvent("chunk", { text });
-              }
-            } catch {
-              // skip malformed SSE lines
-            }
-          }
-        }
-
-        sendEvent("done", { content: fullContent });
-        controller.close();
-      } catch (error) {
-        console.error("SSE AI stream error:", error);
-        sendEvent("error", { message: "Stream failed" });
-        controller.close();
-      }
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive"
-    }
-  });
+import { agencyActor, agencyReportHandlers } from "@/lib/agency-ai-reports";
+import { toolPrompts } from "@/lib/agency-ai-tools";
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+function validTool(value: unknown): value is string { return typeof value === "string" && Object.prototype.hasOwnProperty.call(toolPrompts, value); }
+async function payload(request: Request) {
+  const text = await request.text();
+  if (Buffer.byteLength(text) > 85000) throw new Error("Request too large");
+  const value = JSON.parse(text);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid request");
+  return value as Record<string, unknown>;
+}
+async function get(request: Request) {
+  const actor = await agencyActor();
+  if (!actor) return Response.json({ error: "Authentication is required" }, { status: 401 });
+  const url = new URL(request.url), tool = url.searchParams.get("tool");
+  if (!validTool(tool)) return Response.json({ error: "Select a supported AI tool" }, { status: 422 });
+  const handlers = agencyReportHandlers(tool, actor), prompt = url.searchParams.get("prompt");
+  if (!prompt || url.searchParams.has("history")) return handlers.GET(request);
+  const response = await handlers.POST(new Request(request.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }), signal: request.signal }));
+  if (!response.ok) return response;
+  const result = await response.json(), encoder = new TextEncoder();
+  const stream = new ReadableStream({ start(controller) {
+    controller.enqueue(encoder.encode(`event: chunk\ndata: ${JSON.stringify({ text: result.result.output })}\n\nevent: done\ndata: ${JSON.stringify({ content: result.result.output, model: result.model, id: result.id })}\n\n`));
+    controller.close();
+  } });
+  return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+}
+async function post(request: Request) {
+  const actor = await agencyActor();
+  if (!actor) return Response.json({ error: "Authentication is required" }, { status: 401 });
+  let input;
+  try { input = await payload(request); } catch { return Response.json({ error: "Invalid report request" }, { status: 400 }); }
+  if (Object.keys(input).some(key => !["tool", "prompt", "id", "version"].includes(key))) return Response.json({ error: "Unknown report input" }, { status: 422 });
+  const tool = new URL(request.url).searchParams.get("tool") || input.tool;
+  if (!validTool(tool)) return Response.json({ error: "Select a supported AI tool" }, { status: 422 });
+  const { tool: ignored, ...body } = input;
+  const response = await agencyReportHandlers(tool, actor).POST(new Request(request.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: request.signal }));
+  if (!response.ok) return response;
+  const result = await response.json();
+  let structured = null;
+  try { structured = JSON.parse(result.result.output); } catch {}
+  return Response.json({ ...result, content: result.result.output, structured });
+}
+async function remove(request: Request) {
+  const actor = await agencyActor();
+  if (!actor) return Response.json({ error: "Authentication is required" }, { status: 401 });
+  let input;
+  try { input = await payload(request); } catch { return Response.json({ error: "Invalid deletion request" }, { status: 400 }); }
+  if (Object.keys(input).some(key => !["tool", "id", "version"].includes(key))) return Response.json({ error: "Unknown deletion input" }, { status: 422 });
+  const tool = new URL(request.url).searchParams.get("tool") || input.tool;
+  if (!validTool(tool)) return Response.json({ error: "Select a supported AI tool" }, { status: 422 });
+  const { tool: ignored, ...body } = input;
+  return agencyReportHandlers(tool, actor).DELETE(new Request(request.url, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: request.signal }));
 }
 
-export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const { tool, prompt } = await request.json();
-
-    if (!tool || !prompt) {
-      return NextResponse.json({ error: "Missing tool or prompt" }, { status: 400 });
-    }
-
-    const systemPrompt = toolPrompts[tool] || "You are a helpful assistant.";
-    const isStructured = structuredTools.has(tool);
-
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || "anthropic/claude-3-haiku";
-
-    if (!apiKey) {
-      return NextResponse.json({
-        content: `[Demo Mode] This is a simulated response for the ${tool} tool.\n\nYour request: "${prompt}"\n\nTo enable real AI generation, add your OpenRouter API key to the .env file:\nOPENROUTER_API_KEY=your-api-key-here\nOPENROUTER_MODEL=anthropic/claude-3-haiku`,
-        structured: isStructured ? { demo: true, tool, prompt } : null
-      });
-    }
-
-    const userMessage = isStructured
-      ? `${prompt}\n\nIMPORTANT: Respond with valid JSON only. No markdown, no code fences, no explanatory text outside the JSON object.`
-      : prompt;
-
-    const requestBody: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      max_tokens: 2000,
-      temperature: 0.7
-    };
-
-    // Request JSON response format for structured tools
-    if (isStructured) {
-      requestBody.response_format = { type: "json_object" };
-    }
-
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-        "X-Title": "Agency Services AI Platform"
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error("OpenRouter API error:", errorData);
-      return NextResponse.json({ error: "Failed to generate content" }, { status: 500 });
-    }
-
-    const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || "No response generated";
-
-    if (isStructured) {
-      try {
-        let cleaned = rawContent.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return NextResponse.json({ content: rawContent, structured: parsed });
-      } catch {
-        // If JSON parse fails, return raw with a parse warning
-        return NextResponse.json({ content: rawContent, structured: null, parseWarning: true });
-      }
-    }
-
-    return NextResponse.json({ content: rawContent });
-  } catch (error) {
-    console.error("AI generation error:", error);
-    return NextResponse.json({ error: "Failed to generate content" }, { status: 500 });
-  }
+function guarded(handler: (request: Request) => Promise<Response>) {
+  return async (request: Request) => {
+    try { return await handler(request); }
+    catch { return Response.json({ error: "The AI report service is unavailable. No change was confirmed." }, { status: 503 }); }
+  };
 }
+export const GET = guarded(get);
+export const POST = guarded(post);
+export const DELETE = guarded(remove);
